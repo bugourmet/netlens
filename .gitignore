@@ -1,0 +1,63 @@
+# Build output (.NET)
+bin/
+obj/
+artifacts/
+publish/
+TestResults/
+*.nupkg
+*.snupkg
+
+# Compiled binaries anywhere, including stray build copies
+*.exe
+*.dll
+*.pdb
+*.lib
+*.obj
+*.msix
+*.appx
+native/NetLens.App/capture/
+
+# Visual Studio, Rider, VS Code
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userprefs
+*.rsuser
+
+# Node and the UI build
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+npm-debug.log*
+.vite/
+
+# Generated: the UI copied into the app (tools/build-app.ps1)
+native/NetLens.App/Resources/Raw/wwwroot/
+
+# Downloaded data: DB-IP databases (tools/get-geodata.ps1)
+native/geo/
+*.mmdb
+*.mmdb.gz
+
+# Local runtime data and logs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+*.log.old
+
+
+# OS clutter
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Maintainer-only scripts (screenshots, licence collection)
+tools/local/
+
+# Local AI tool configuration
+.claude/
