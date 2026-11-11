@@ -45,21 +45,27 @@ const fragmentShader = /* glsl */ `
     float d = dot(n, sunDir);
     float dayAmount = smoothstep(-0.07, 0.2, d) * sunlit;
 
-    // Day side stays dark and desaturated so arcs and labels keep reading on top of it.
+    // Day side: muted so arcs and labels keep reading on top, but clearly daylit.
     vec3 raw = texture2D(dayMap, vUv).rgb;
     float gray = dot(raw, vec3(0.3, 0.59, 0.11));
-    vec3 day = mix(vec3(gray), raw, 0.45);
-    day = pow(day, vec3(1.9)) * vec3(0.66, 0.74, 0.8);
-    day = day / (1.0 + day * 4.0); // keeps ice and desert from blowing out
-    day *= 0.12 + 0.68 * max(d, 0.0);
+    vec3 day = mix(vec3(gray), raw, 0.6);
+    day = pow(day, vec3(1.55)) * vec3(0.78, 0.86, 0.92);
+    day = day / (1.0 + day * 2.2); // keeps ice and desert from blowing out
+    day *= 0.18 + 0.82 * max(d, 0.0);
 
-    // The night photo has a blue cast, so keep only actual lights and darken the sea.
+    // Night side. The Black Marble photo also shows faint ground and ice, which reads
+    // as false daylight. City lights are white to warm while that ground is blue, so
+    // separate them by colour, not brightness.
     float water = texture2D(waterMap, vUv).r;
     vec3 nightRaw = texture2D(nightMap, vUv).rgb;
-    float glow = smoothstep(0.06, 0.4, dot(nightRaw, vec3(0.5, 0.4, 0.1)));
-    vec3 lights = pow(nightRaw, vec3(1.15)) * vec3(2.3, 1.6, 0.95) * glow;
-    vec3 base = mix(vec3(0.012, 0.024, 0.03), vec3(0.003, 0.012, 0.02), water);
-    vec3 night = lights * (1.0 - water * 0.75) + base;
+    float warmth = nightRaw.r - 0.6 * nightRaw.b;
+    float lightMask = smoothstep(0.02, 0.28, warmth);
+    vec3 lights = pow(nightRaw, vec3(1.1)) * vec3(1.9, 1.4, 0.9) * lightMask * (1.0 - water * 0.75);
+    // Output is gamma-encoded for display, which lifts small values a lot (0.02 shows as
+    // about 40/255), so a faint glow needs a very small factor.
+    vec3 moonlitGround = nightRaw * 0.012 * (1.0 - water); // just enough to see coastlines
+    vec3 sea = mix(vec3(0.008, 0.018, 0.026), vec3(0.003, 0.01, 0.018), water);
+    vec3 night = lights + moonlitGround + sea;
     vec3 color = mix(night, day, dayAmount);
 
     // Deep blue seas on the day side, with a soft sheen toward the sun.

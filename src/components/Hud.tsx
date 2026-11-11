@@ -3,6 +3,8 @@ import { History, Keyboard, Search, Settings2, X } from 'lucide-react';
 import { apps, countries, providers } from '../data/catalog';
 import { useApp, useFrame, type View } from '../state/store';
 import { fmtClock } from '../ui/format';
+import { requestStart } from '../data/source';
+import { useSettings } from '../state/settings';
 import type { Focus, SourceStatus } from '../data/types';
 
 export function focusLabel(f: Focus) {
@@ -53,7 +55,13 @@ export function Hud() {
   const seek = useApp((s) => s.seek);
   const setPalette = useApp((s) => s.setPalette);
   const setHelp = useApp((s) => s.setHelp);
-  const badge = statusBadge(useApp((s) => s.status));
+  const status = useApp((s) => s.status);
+  const badge = statusBadge(status);
+  const setSetting = useSettings((s) => s.set);
+  const enableFull = () => {
+    setSetting('captureMode', 'full');
+    requestStart('full');
+  };
 
   return (
     <header className="hud rise">
@@ -92,7 +100,13 @@ export function Hud() {
             </motion.button>
           )}
         </AnimatePresence>
-        <span className={`status ${badge.tone}`} title={badge.title}><i />{badge.text}</span>
+        {status.state === 'limited' && status.control ? (
+          <button className={`status status-action ${badge.tone}`} title="Ask Windows for admin and switch to full capture" onClick={enableFull}>
+            <i />{badge.text}<span className="status-cta">Enable full capture</span>
+          </button>
+        ) : (
+          <span className={`status ${badge.tone}`} title={badge.title}><i />{badge.text}</span>
+        )}
         <button className="ghost-btn" onClick={() => setPalette(true)} aria-label="Search">
           <Search size={15} />
           <kbd>Ctrl K</kbd>

@@ -27,6 +27,8 @@ internal sealed class CaptureClient
     private NamedPipeClientStream? _pipe;
     private TaskCompletionSource<string>? _startRequest;
     private bool _resync;
+    private bool _upgrading;
+    private int? _helperPid;
     private string _lastStatus = "connecting";
 
     public CaptureClient(Action<string> send)
@@ -55,10 +57,55 @@ internal sealed class CaptureClient
         Status(_lastStatus);
     }
 
-    /// <summary>The user chose to start capture: "full" asks for admin, "limited" doesn't.</summary>
+    /// <summary>
+    /// The user chose a capture mode: "full" asks for admin, "limited" doesn't.
+    /// While limited capture is running, "full" switches to full capture.
+    /// </summary>
     public void RequestStart(string mode)
     {
-        lock (_gate) _startRequest?.TrySetResult(mode);
+        lock (_gate)
+        {
+            if (_startRequest is { Task.IsCompleted: false })
+            {
+                _startRequest.TrySetResult(mode);
+                return;
+            }
+        }
+        if (mode == "full") _ = Task.Run(UpgradeToFull);
+    }
+
+    /// <summary>
+    /// Asks for admin first and only then stops the limited helper, so declining
+    /// the prompt leaves limited capture running instead of nothing.
+    /// </summary>
+    private void UpgradeToFull()
+    {
+        int limitedPid;
+        lock (_gate)
+        {
+            if (_pipe is null || _helperPid is not { } pid) return;
+            limitedPid = pid;
+        }
+
+        var launched = LaunchHelper("full");
+        if (launched != Launch.Started)
+        {
+            Status(launched == Launch.Declined ? "upgrade-declined" : "upgrade-failed");
+            return;
+        }
+
+        lock (_gate) _upgrading = true;
+        try
+        {
+            // The limited helper runs as this user, so it can be stopped. The new
+            // one is waiting for it and takes over the moment it exits.
+            using var limited = Process.GetProcessById(limitedPid);
+            limited.Kill();
+        }
+        catch (Exception e) when (e is ArgumentException or Win32Exception or InvalidOperationException)
+        {
+            Log($"couldn't stop the limited helper: {e.Message}");
+        }
     }
 
     private async Task RunAsync()
@@ -71,6 +118,20 @@ internal sealed class CaptureClient
             timeout = TimeSpan.FromMilliseconds(600);
             if (result == Relay.Resync) continue;
             if (result == Relay.Ended) everConnected = true;
+
+            // Switching to full capture: the old helper just stopped, so connect to its replacement.
+            bool upgrading;
+            lock (_gate)
+            {
+                upgrading = _upgrading;
+                _upgrading = false;
+            }
+            if (upgrading)
+            {
+                Status("connecting");
+                timeout = TimeSpan.FromSeconds(20);
+                continue;
+            }
 
             var status = result == Relay.Foreign ? "conflict" : everConnected ? "lost" : "needs-start";
             while (true)
@@ -187,8 +248,11 @@ internal sealed class CaptureClient
         {
             var size = 1024;
             var path = new StringBuilder(size);
-            return QueryFullProcessImageName(process, 0, path, ref size)
-                && string.Equals(path.ToString(), _helperPath, StringComparison.OrdinalIgnoreCase);
+            if (!QueryFullProcessImageName(process, 0, path, ref size)
+                || !string.Equals(path.ToString(), _helperPath, StringComparison.OrdinalIgnoreCase))
+                return false;
+            lock (_gate) _helperPid = pid;
+            return true;
         }
         finally
         {

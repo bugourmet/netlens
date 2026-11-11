@@ -25,7 +25,18 @@ void Diag(string message)
 AppDomain.CurrentDomain.UnhandledException += (_, e) => Diag($"FATAL {e.ExceptionObject}");
 
 // One helper per machine: two would fight over the single named ETW session.
-using var instance = new Mutex(initiallyOwned: true, @"Global\NetLens.Capture", out var isOnlyInstance);
+// Wait a little, because switching from limited to full capture starts this
+// helper just before the app stops the old one.
+using var instance = new Mutex(initiallyOwned: false, @"Global\NetLens.Capture");
+bool isOnlyInstance;
+try
+{
+    isOnlyInstance = instance.WaitOne(TimeSpan.FromSeconds(15));
+}
+catch (AbandonedMutexException)
+{
+    isOnlyInstance = true; // the previous helper was stopped without releasing it; we own it now
+}
 if (!isOnlyInstance)
 {
     Diag("another helper is already running");
@@ -135,6 +146,7 @@ try
 catch (OperationCanceledException) { }
 
 etw?.Dispose();
+instance.ReleaseMutex();
 Diag("stopped");
 return exitCode;
 

@@ -48,9 +48,24 @@ export function Notices() {
     return () => clearTimeout(id);
   }, [toast]);
 
+  const notice = useApp((s) => s.notice);
+  const setNotice = useApp((s) => s.setNotice);
+  useEffect(() => {
+    if (!notice) return;
+    const id = setTimeout(() => setNotice(null), 8000);
+    return () => clearTimeout(id);
+  }, [notice, setNotice]);
+
   return (
     <div className="notices">
       <AnimatePresence>
+        {notice && (
+          <motion.div key="notice" layout className="notice glass" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} role="status">
+            <SeverityBadge severity="info" />
+            <div className="notice-body"><span>{notice}</span></div>
+            <button className="icon-btn small" aria-label="Dismiss" onClick={() => setNotice(null)}><X size={14} /></button>
+          </motion.div>
+        )}
         {toast && (
           <motion.div key="toast" layout className={`notice glass ${toast.severity === 'critical' ? 'alarm' : ''}`} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }} role="status">
             <SeverityBadge severity={toast.severity} />

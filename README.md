@@ -72,6 +72,8 @@ On first launch, NetLens explains capture before anything asks for admin:
 
 After the first choice, later launches start the same way automatically. Both behaviours can be changed in **Settings → Capture**.
 
+To switch from limited to full capture at any time, click the **Limited · Enable full capture** badge in the top bar. Windows asks for admin first, and if you decline, limited capture keeps running. Switching back to limited takes effect the next time NetLens opens.
+
 ### Screens
 
 | Screen | Key | Shows |
@@ -224,7 +226,7 @@ NetLens.Capture (elevated)  --named pipe-->  NetLens.App (MAUI + WebView2)  --> 
 | `C:\ProgramData\NetLens\netlens.db` | First-seen memory for full capture (admin-only folder) |
 | `%LOCALAPPDATA%\NetLens\netlens.db` | First-seen memory for limited mode |
 | `%LOCALAPPDATA%\NetLens\app.log` | App connection errors. Rotated at 256 KB to `app.log.old` |
-| The app's WebView2 profile | Settings |
+| `NetLens.App.exe.WebView2` next to the app | Settings (the app's WebView2 profile) |
 
 To reset everything, use **Settings → Reset to defaults**, then delete both `NetLens` folders. The one in ProgramData needs admin.
 
@@ -243,7 +245,7 @@ To reset everything, use **Settings → Reset to defaults**, then delete both `N
 | You see | Meaning and fix |
 |---|---|
 | **Not capturing** | Capture hasn't been started, or admin was declined. Choose an option on the card |
-| **Limited** | Running without admin. Restart NetLens and choose **Start with admin** |
+| **Limited** | Running without admin. Click the **Limited · Enable full capture** badge, or choose **Full** in Settings → Capture, and approve the admin prompt. If you decline, limited capture keeps running |
 | **Capture stopped** | The helper closed or crashed. Click **Restart capture** |
 | **Capture off** | The helper is missing, blocked (for example by antivirus), or another copy of NetLens is capturing. Close other copies and retry |
 | **Restart needed** | A helper from a different version is still running. Close NetLens fully, wait a minute, and open it again |

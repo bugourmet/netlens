@@ -27,8 +27,14 @@ interface Tick extends Registers, Sample {
 }
 interface Status {
   type: 'status';
-  state: CaptureState;
+  /** The upgrade-* states report a failed switch to full capture; limited capture keeps running. */
+  state: CaptureState | 'upgrade-declined' | 'upgrade-failed';
 }
+
+const UPGRADE_NOTICES = {
+  'upgrade-declined': 'Admin was declined, so NetLens is still in limited mode.',
+  'upgrade-failed': "Full capture couldn't start. NetLens is still in limited mode.",
+} as const;
 type Message = Hello | Tick | Status;
 
 declare global {
@@ -58,7 +64,8 @@ function merge(m: Registers) {
 
 function handle(m: Message) {
   if (m.type === 'status') {
-    setStatus(m.state);
+    if (m.state === 'upgrade-declined' || m.state === 'upgrade-failed') useApp.getState().setNotice(UPGRADE_NOTICES[m.state]);
+    else setStatus(m.state);
   } else if (m.type === 'hello') {
     if (m.protocol !== PROTOCOL) return setStatus('incompatible');
     clearRegistries();
@@ -86,7 +93,10 @@ function receive(raw: string) {
   handle(message);
 }
 
-/** Asks the app to start the capture helper. "full" shows the Windows admin prompt. */
+/**
+ * Asks the app to start capture. "full" shows the Windows admin prompt; while
+ * limited capture runs, it switches to full and keeps limited if admin is declined.
+ */
 export function requestStart(mode: 'full' | 'limited') {
   sendToShell?.(`start:${mode}`);
 }

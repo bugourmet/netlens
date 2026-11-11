@@ -4,6 +4,7 @@ import countryRows from '../../native/NetLens.Core/countries.json';
 import { systemHome } from '../data/catalog';
 import { useApp } from '../state/store';
 import { useSettings, type Settings } from '../state/settings';
+import { requestStart } from '../data/source';
 import { Sheet } from './Sheet';
 
 function Row({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
@@ -31,14 +32,18 @@ function Toggle({ name, label }: { name: BooleanSetting; label: string }) {
   );
 }
 
-function Choice<K extends ChoiceSetting>({ name, options, label }: { name: K; options: { value: Settings[K]; label: string }[]; label: string }) {
+function Choice<K extends ChoiceSetting>({ name, options, label, onPick }: { name: K; options: { value: Settings[K]; label: string }[]; label: string; onPick?: (value: Settings[K]) => void }) {
   const value = useSettings((s) => s[name]);
   const set = useSettings((s) => s.set);
+  const pick = (v: Settings[K]) => {
+    set(name, v);
+    onPick?.(v);
+  };
   return (
     <div className="segmented" role="radiogroup" aria-label={label}>
       <LayoutGroup id={`set-${name}`}>
         {options.map((o) => (
-          <button key={String(o.value)} role="radio" aria-checked={value === o.value} onClick={() => set(name, o.value)}>
+          <button key={String(o.value)} role="radio" aria-checked={value === o.value} onClick={() => pick(o.value)}>
             {value === o.value && <motion.span layoutId="pill" className="seg-pill" />}
             <span>{o.label}</span>
           </button>
@@ -81,6 +86,11 @@ export function SettingsPage() {
   const reset = useSettings((s) => s.reset);
   const rotate = useSettings((s) => s.rotate);
   const status = useApp((s) => s.status);
+  const captureMode = useSettings((s) => s.captureMode);
+  const captureHint =
+    status.state === 'full' && captureMode === 'limited'
+      ? 'Limited mode starts next time NetLens opens.'
+      : 'Limited needs no admin, but shows no traffic amounts, UDP or domain names. Full asks Windows for admin.';
   const countries = [...(countryRows as { cc: string; name: string }[])].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
@@ -127,8 +137,17 @@ export function SettingsPage() {
           <Row title="Start automatically" hint="Off asks before each start. Full capture still shows the Windows admin prompt.">
             <Toggle name="autoStart" label="Start capture automatically" />
           </Row>
-          <Row title="Capture mode" hint="Limited needs no admin, but shows no traffic amounts, UDP or domain names.">
-            <Choice name="captureMode" label="Capture mode" options={[{ value: 'full', label: 'Full' }, { value: 'limited', label: 'Limited' }]} />
+          <Row title="Capture mode" hint={captureHint}>
+            <Choice
+              name="captureMode"
+              label="Capture mode"
+              options={[{ value: 'full', label: 'Full' }, { value: 'limited', label: 'Limited' }]}
+              onPick={(mode) => {
+                // Full applies now. Going back to limited waits for the next start: the
+                // app can't stop an admin process it doesn't own the rights to.
+                if (mode === 'full' && status.control && status.state === 'limited') requestStart('full');
+              }}
+            />
           </Row>
 
           <h2>Alerts and data</h2>

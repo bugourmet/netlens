@@ -4,6 +4,12 @@ import { esc, fmtBytes, fmtRate } from '../ui/format';
 
 // Turns a frame of traffic into the globe's layers: arcs, light bars and tags. Pure data, no rendering.
 
+/**
+ * How long an arc stays after its last byte. Traffic is bursty, so without this, arcs
+ * would vanish and reappear from one second to the next.
+ */
+export const ARC_HOLD_MS = 8000;
+
 /** One provider at one place. Drawn twice: a faint permanent path and a moving comet while traffic flows. */
 export interface ArcDatum {
   key: string;
@@ -19,6 +25,8 @@ export interface ArcDatum {
   placeId: string;
   appNames: string[];
   level: number; // 0 quiet, 1-3 by speed
+  lastActive: number; // ms timestamp of the last traffic
+  reveal: number; // 0 to 1: how much of the line has been drawn since the connection appeared
 }
 
 export interface BarDatum {
@@ -46,23 +54,26 @@ const levelOf = (rate: number) => (rate > 1024 * 1024 ? 3 : rate > 100 * 1024 ? 
 
 /**
  * Busiest arcs first, flagged always kept. The cache keeps object identity between frames,
- * which lets the globe update arcs in place instead of rebuilding them.
+ * which lets the globe update arcs in place instead of rebuilding them, and remembers when
+ * each one last carried traffic.
  */
-export function buildArcs(frame: Frame, focused: boolean, limit: number, cache: Map<string, [ArcDatum, ArcDatum]>): ArcDatum[] {
+export function buildArcs(frame: Frame, focused: boolean, limit: number, cache: Map<string, [ArcDatum, ArcDatum]>, now = Date.now()): ArcDatum[] {
   const seen = new Map<string, ArcDatum>();
   for (const v of frame.flows) {
     const rate = v.down + v.up;
     const flagged = !!apps[v.def.appId]?.flagged;
-    if (rate === 0 && !focused && !flagged) continue;
     const place = places[v.def.placeId];
     if (place?.lat == null || place.lng == null) continue;
     if (Math.abs(place.lat - home.lat) + Math.abs(place.lng - home.lng) < 0.5) continue; // same spot: no arc to draw
     const key = `${v.def.providerId}|${v.def.placeId}`;
+    let pair = cache.get(key);
+    const recent = pair && now - pair[1].lastActive < ARC_HOLD_MS;
+    if (rate === 0 && !focused && !flagged && !recent) continue;
+
     let comet = seen.get(key);
     if (!comet) {
-      let pair = cache.get(key);
       if (!pair) {
-        const base = { key, startLat: home.lat, startLng: home.lng, endLat: place.lat, endLng: place.lng, rate: 0, total: 0, flagged: false, providerId: v.def.providerId, placeId: v.def.placeId, appNames: [], level: 0 };
+        const base = { key, startLat: home.lat, startLng: home.lng, endLat: place.lat, endLng: place.lng, rate: 0, total: 0, flagged: false, providerId: v.def.providerId, placeId: v.def.placeId, appNames: [], level: 0, lastActive: 0, reveal: 0 };
         pair = [{ ...base, kind: 'path' }, { ...base, kind: 'comet', appNames: [] }];
         cache.set(key, pair);
       }
@@ -80,9 +91,14 @@ export function buildArcs(frame: Frame, focused: boolean, limit: number, cache: 
   const ranked = [...seen.values()].sort((x, y) => Number(y.flagged) - Number(x.flagged) || y.rate - x.rate).slice(0, limit);
   const out: ArcDatum[] = [];
   for (const comet of ranked) {
-    comet.level = levelOf(comet.rate);
+    if (comet.rate > 0) {
+      comet.lastActive = now;
+      comet.level = levelOf(comet.rate);
+    } else if (now - comet.lastActive >= ARC_HOLD_MS) {
+      comet.level = 0;
+    } // else: keep the last level while the arc is held
     const path = cache.get(comet.key)![0];
-    Object.assign(path, { rate: comet.rate, total: comet.total, flagged: comet.flagged, appNames: comet.appNames, level: comet.level });
+    Object.assign(path, { rate: comet.rate, total: comet.total, flagged: comet.flagged, appNames: comet.appNames, level: comet.level, lastActive: comet.lastActive });
     out.push(path);
     if (comet.level > 0) out.push(comet);
   }

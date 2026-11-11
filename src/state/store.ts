@@ -23,6 +23,8 @@ interface State {
   previousView: View;
   sideTab: 'app' | 'provider';
   homeFlights: number; // bumped to send the camera home
+  notice: string | null; // short message shown as a toast
+  setNotice: (n: string | null) => void;
   setView: (v: View) => void;
   closeSheet: () => void;
   setStage: (s: StageMode) => void;
@@ -61,6 +63,8 @@ export const useApp = create<State>((set, get) => ({
   previousView: 'overview',
   sideTab: 'app',
   homeFlights: 0,
+  notice: null,
+  setNotice: (notice) => set({ notice }),
   setView: (view) => {
     if (view !== get().view) set({ view, previousView: get().view });
   },

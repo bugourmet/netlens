@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { apps, clearRegistries, flows, home, places, providers } from '../data/catalog';
 import { Engine, buildFrame } from '../data/engine';
 import { sunDirection } from './earth';
-import { buildArcs, buildBars, pickTags, type ArcDatum } from './layers';
+import { ARC_HOLD_MS, buildArcs, buildBars, pickTags, type ArcDatum } from './layers';
 
 // Back from three-globe's xyz convention to latitude and longitude.
 function subsolar(utc: number) {
@@ -73,6 +73,18 @@ describe('layers', () => {
     const second = buildArcs(frameOf([0], [900]), false, 40, cache);
     expect(second[0]).toBe(first[0]);
     expect(second[1].rate).toBe(900);
+  });
+
+  it('holds an arc for a few seconds after its traffic stops, then drops it', () => {
+    const cache = new Map<string, [ArcDatum, ArcDatum]>();
+    const engine = new Engine();
+    engine.reset([{ t: 100, ids: [0], down: [5000], up: [0] }]);
+    buildArcs(buildFrame(engine, null, null), false, 40, cache, 1_000_000);
+
+    engine.push({ t: 101, ids: [], down: [], up: [] }); // the connection goes quiet
+    const quiet = buildFrame(engine, null, null);
+    expect(buildArcs(quiet, false, 40, cache, 1_000_000 + ARC_HOLD_MS - 1).map((a) => a.kind).sort()).toEqual(['comet', 'path']);
+    expect(buildArcs(quiet, false, 40, cache, 1_000_000 + ARC_HOLD_MS + 1)).toHaveLength(0);
   });
 
   it('respects the arc limit', () => {

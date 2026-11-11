@@ -25,6 +25,27 @@ const viewShift = (phone: boolean, view: View, width: number) => (phone ? 0 : vi
 
 const prefersReducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** How long a new connection's line takes to draw out from home. */
+const REVEAL_MS = 1200;
+const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
+
+/**
+ * A fixed start point per comet, so comets don't fly in lockstep. Fixed rather than random,
+ * because the globe re-reads it on every data update and a new value would make comets jump.
+ */
+function cometPhase(key: string) {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) | 0;
+  return ((h >>> 0) % 1000) / 1000 * 1.2;
+}
+
+/** Sets a drawn path's visible share directly on its shader, between data updates. */
+function applyReveal(a: ArcDatum) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const uniforms = (a as any).__threeObjArc?.children[0]?.material?.uniforms;
+  if (uniforms) uniforms.dashSize.value = a.reveal;
+}
+
 /** Reuses one element per place so numbers update in place. Text only, never HTML. */
 function tagElement(cache: Map<string, HTMLDivElement>, t: TagDatum) {
   let el = cache.get(t.placeId);
@@ -49,6 +70,8 @@ export function GlobeStage() {
   const arcCache = useRef(new Map<string, [ArcDatum, ArcDatum]>());
   const tagElements = useRef(new Map<string, HTMLDivElement>());
   const lastSignature = useRef('');
+  const shownPaths = useRef(new Set<string>());
+  const revealing = useRef(new Map<ArcDatum, number>()); // path -> draw start time
   const introDone = useRef(false);
   const shift = useRef(0);
   const [failed, setFailed] = useState(false);
@@ -107,17 +130,24 @@ export function GlobeStage() {
       .arcStartLng('startLng')
       .arcEndLat('endLat')
       .arcEndLng('endLng')
+      // Paths are 1-pixel lines: a thin tube breaks into dots once it is narrower than a pixel.
+      // Comets keep a fixed width and speed, because changing either rebuilds or restarts them
+      // mid-flight; traffic level shows as brightness instead.
       .arcColor((a: ArcDatum) => {
-        if (a.kind === 'path') return a.flagged ? 'rgba(255,92,108,.32)' : 'rgba(120,235,225,.13)';
-        return a.flagged ? ['rgba(255,92,108,0)', '#ffd2d6'] : ['rgba(98,230,216,0)', 'rgba(98,230,216,.75)', '#f4fffd'];
+        if (a.kind === 'path') return a.flagged ? 'rgba(255,92,108,.45)' : 'rgba(120,235,225,.22)';
+        if (a.flagged) return ['rgba(255,92,108,0)', '#ffd2d6'];
+        const head = ['rgba(98,230,216,.55)', 'rgba(170,250,242,.8)', '#f4fffd'][a.level - 1] ?? '#f4fffd';
+        return ['rgba(98,230,216,0)', 'rgba(98,230,216,.6)', head];
       })
-      .arcStroke((a: ArcDatum) => (a.kind === 'path' ? 0.14 : 0.3 + a.level * 0.17))
+      .arcStroke((a: ArcDatum) => (a.kind === 'path' ? null : 0.5))
       .arcAltitudeAutoScale(0.38)
       .arcCurveResolution(96)
-      .arcDashLength((a: ArcDatum) => (a.kind === 'path' ? 1 : 0.28))
-      .arcDashGap((a: ArcDatum) => (a.kind === 'path' ? 0 : 0.9))
-      .arcDashInitialGap((a: ArcDatum) => (a.kind === 'path' ? 0 : Math.random() * 1.2))
-      .arcDashAnimateTime((a: ArcDatum) => (a.kind === 'path' ? 0 : [0, 3400, 2300, 1400][a.level]))
+      // Dashes are measured from home (0) to the far end (1). A path is one dash as long as
+      // its reveal, so growing that from 0 to 1 draws the line out from home.
+      .arcDashLength((a: ArcDatum) => (a.kind === 'path' ? a.reveal : 0.3))
+      .arcDashGap((a: ArcDatum) => (a.kind === 'path' ? 2 : 0.9))
+      .arcDashInitialGap((a: ArcDatum) => (a.kind === 'path' ? 0 : cometPhase(a.key)))
+      .arcDashAnimateTime((a: ArcDatum) => (a.kind === 'path' ? 0 : 2400))
       .arcsTransitionDuration(0)
       .arcLabel(arcLabel)
       .onArcClick((a: ArcDatum) => useApp.getState().select({ type: 'provider', id: a.providerId }))
@@ -271,6 +301,17 @@ export function GlobeStage() {
     const bars = buildBars(arcs);
     const tags = pickTags(arcs, phone ? 2 : 5);
 
+    // Connections new to the globe draw in; ones already shown stay as they are.
+    const now = performance.now();
+    const paths = arcs.filter((a) => a.kind === 'path');
+    for (const a of paths) {
+      if (shownPaths.current.has(a.key) && a.reveal > 0) continue;
+      a.reveal = reduced ? 1 : 0;
+      if (!reduced) revealing.current.set(a, now);
+    }
+    shownPaths.current = new Set(paths.map((a) => a.key));
+    for (const a of revealing.current.keys()) if (!shownPaths.current.has(a.key)) revealing.current.delete(a);
+
     const signature = `${arcs.map((a) => `${a.key}:${a.kind}:${a.level}:${a.flagged}`).sort().join(',')}|${tags.map((t) => t.placeId).join()}|${home.lat},${home.lng}`;
     if (signature !== lastSignature.current) {
       lastSignature.current = signature;
@@ -284,7 +325,24 @@ export function GlobeStage() {
       for (const t of tags) tagElement(tagElements.current, t); // same tags, fresh numbers
     }
     g.pointsData(bars);
-  }, [frame, focus, arcLimit, homeCc, phone]);
+  }, [frame, focus, arcLimit, homeCc, phone, reduced]);
+
+  // Draws new lines out from home, like a progress bar.
+  useEffect(() => {
+    let id = 0;
+    const tick = () => {
+      const now = performance.now();
+      for (const [a, start] of revealing.current) {
+        const t = Math.min(1, (now - start) / REVEAL_MS);
+        a.reveal = easeOut(t);
+        applyReveal(a);
+        if (t === 1) revealing.current.delete(a);
+      }
+      id = requestAnimationFrame(tick);
+    };
+    id = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   return (
     <div className="scene" aria-hidden={view !== 'overview'}>
